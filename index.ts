@@ -21,6 +21,7 @@ import { applyRotation } from "./src/rotateBall";
 import { afk } from "./src/afk";
 import { initPlayer } from "./src/welcome";
 import * as crypto from "node:crypto";
+import { PowerBar } from "./src/powerBar";
 
 export const version = '1.3.6 (16/09/2025)'
 
@@ -100,6 +101,8 @@ export class Game {
   holdPlayers: holdPlayer[];
   rotateNextKick: boolean;
   boostCount: number;
+  powerBar: PowerBar | null;
+  isSetPiece: boolean;
 
   constructor() {
     gameId += 1;
@@ -116,6 +119,8 @@ export class Game {
     this.holdPlayers = JSON.parse(JSON.stringify(players.map(p => { return { id: p.id, auth: p.auth, team: p.team }})))
     this.rotateNextKick = false;
     this.boostCount = 0;
+    this.powerBar = null;
+    this.isSetPiece = false;
   }
   rotateBall() {
     rotateBall(this);
@@ -233,9 +238,9 @@ const roomBuilder = async (HBInit: Headless, args: RoomConfigObject) => {
       game.handleBallTouch(playerList);
       
       // Update power bar with reduced frequency for performance
-      if (i > 5 && (game as any).powerBar && (game as any).isSetPiece) {
-        (game as any).powerBar.checkActivation((game as any).isSetPiece);
-        (game as any).powerBar.update();
+      if (i > 5 && game.powerBar && game.isSetPiece) {
+        game.powerBar.checkActivation(game.isSetPiece);
+        game.powerBar.update();
       }
       
       if (i > 6) {
@@ -349,10 +354,10 @@ const roomBuilder = async (HBInit: Headless, args: RoomConfigObject) => {
     stats.initAllPlayers();
     // Announce match type (ranked/unranked)
     stats.announceMatchType();
-    if (game && (game as any).powerBar) {
-      (game as any).powerBar.hide();
-      (game as any).powerBar = null;
-      (game as any).isSetPiece = false;
+    if (game && game.powerBar) {
+      game.powerBar.hide();
+      game.powerBar = null;
+      game.isSetPiece = false;
     }
     room.getPlayerList().forEach((p) => room.setPlayerAvatar(p.id, ""));
   };
@@ -401,8 +406,8 @@ const roomBuilder = async (HBInit: Headless, args: RoomConfigObject) => {
       stats.trackBallTouch(pp);
       
       // Apply power bar boost if active
-      if ((game as any).powerBar && (game as any).isSetPiece) {
-        (game as any).powerBar.applyPower(pp);
+      if (game.powerBar && game.isSetPiece) {
+        game.powerBar.applyPower(pp);
       }
       
       teamplayBoost(game, p);

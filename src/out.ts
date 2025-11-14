@@ -84,8 +84,8 @@ const cornerKick = async (
   
   // Initialize power bar for corner kick
   const powerBar = new PowerBar(game);
-  (game as any).powerBar = powerBar;
-  (game as any).isSetPiece = true;
+  game.powerBar = powerBar;
+  game.isSetPiece = true;
   room.sendAnnouncement("⚡ Power Bar Active - Get close to ball to charge your kick!", forTeam);
   
   throwRealBall(
@@ -132,8 +132,8 @@ const goalKick = async (
   
   // Initialize power bar for goal kick
   const powerBar = new PowerBar(game);
-  (game as any).powerBar = powerBar;
-  (game as any).isSetPiece = true;
+  game.powerBar = powerBar;
+  game.isSetPiece = true;
   room.sendAnnouncement("⚡ Power Bar Active - Get close to ball to charge your kick!", forTeam);
   
   throwRealBall(
@@ -276,8 +276,8 @@ export const freeKick = async (
   
   // Initialize power bar for free kick
   const powerBar = new PowerBar(game);
-  (game as any).powerBar = powerBar;
-  (game as any).isSetPiece = true;
+  game.powerBar = powerBar;
+  game.isSetPiece = true;
   room.sendAnnouncement("⚡ Power Bar Active - Get close to ball to charge your kick!", forTeam);
   
   throwRealBall(game, forTeam, pos, savedEventCounter);
@@ -322,10 +322,10 @@ export const handleBallInPlay = async (game: Game) => {
     game.inPlay = true;
     
     // Clear power bar when ball is in play
-    if ((game as any).powerBar) {
-      (game as any).powerBar.hide();
-      (game as any).powerBar = null;
-      (game as any).isSetPiece = false;
+    if (game.powerBar) {
+      game.powerBar.hide();
+      game.powerBar = null;
+      game.isSetPiece = false;
     }
     
     room
@@ -535,8 +535,8 @@ export const penalty = async (
   
   // Initialize power bar for penalty
   const powerBar = new PowerBar(game);
-  (game as any).powerBar = powerBar;
-  (game as any).isSetPiece = true;
+  game.powerBar = powerBar;
+  game.isSetPiece = true;
   room.sendAnnouncement("⚡ Power Bar Active - Get close to ball to charge your kick!", forTeam);
   
   throwRealBall(game, forTeam, pos, savedEventCounter);

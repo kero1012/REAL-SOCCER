@@ -66,8 +66,8 @@ export const getOrCreatePlayer = async (
     return { elo: 1200, vip: false };
   }
 
-const vipBool = playerInDb.vip === 1;
+  const vipBool = playerInDb.vip === '1';
 
-  return { elo: playerInDb.elo, vip: !!vipBool };
+  return { elo: playerInDb.elo, vip: vipBool };
 };
 

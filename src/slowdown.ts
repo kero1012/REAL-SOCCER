@@ -15,7 +15,7 @@ export const applySlowdown = (playerList?: PlayerObject[]) => {
         return;
       }
       const props = room.getPlayerDiscProperties(p.id);
-      if (!props || !props.xspeed || !props.yspeed) {
+      if (!props || props.xspeed === undefined || props.yspeed === undefined) {
         return;
       }
       room.setPlayerDiscProperties(p.id, {

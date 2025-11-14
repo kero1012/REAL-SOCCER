@@ -77,7 +77,7 @@ const checkOffside = async (game: Game, p: PlayerAugmented) => {
     return;
   }
 
-  if (room.getPlayerList().filter((p) => p.team != 0).length <= 6) {
+  if (room.getPlayerList().filter((p) => p.team != 0).length <= 4) {
     sendMessage("❌🚩 NO OFFSIDE with 4 players or below.");
     return;
   }
