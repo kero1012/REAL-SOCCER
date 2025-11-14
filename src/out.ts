@@ -259,10 +259,8 @@ const throwIn = async (
     (game.id != currentGameId || game.eventCounter != savedEventCounter)
   ) {
     return;
-  } // if next game started but its still on out
-  const newForTeam = forTeam == 1 ? 2 : 1;
-  game.animation = true; // when giving out to other team, ball is moved, that can evoke game.inPlay = true and double-activate throwin (new throwin for opposite team and again the same team, as it will detect the ball moving)
-  throwIn(game, newForTeam, pos);
+  }
+  game.animation = false;
 };
 
 export const freeKick = async (

@@ -14,13 +14,14 @@ export const isPenalty = (victim: PlayerAugmented) => {
   return result;
 };
 
-export const checkFoul = async () => {
-  room
-    .getPlayerList()
+export const checkFoul = async (playerList?: PlayerObject[]) => {
+  const list = playerList ?? room.getPlayerList();
+  const redPlayers = list.filter((pp) => pp.team == 1);
+  const bluePlayers = list.filter((pp) => pp.team == 2);
+  list
     .filter((p) => p.team != 0 && toAug(p).sliding)
     .forEach((p) => {
       const ballPos = room.getBallPosition();
-
       const distToBall = Math.sqrt(
         (p.position.x - ballPos.x) ** 2 + (p.position.y - ballPos.y) ** 2,
       );
@@ -29,18 +30,16 @@ export const checkFoul = async () => {
         return;
       }
       const enemyTeam = p.team == 1 ? 2 : 1;
-      room
-        .getPlayerList()
-        .filter((pp) => pp.team == enemyTeam)
-        .forEach((enemy) => {
-          const dist = Math.sqrt(
-            (p.position.x - enemy.position.x) ** 2 +
-              (p.position.y - enemy.position.y) ** 2,
-          );
-          if (dist < defaults.playerRadius * 2 + 0.1) {
-            handleSlide(toAug(p), toAug(enemy));
-          }
-        });
+      const opponents = enemyTeam == 1 ? redPlayers : bluePlayers;
+      opponents.forEach((enemy) => {
+        const dist = Math.sqrt(
+          (p.position.x - enemy.position.x) ** 2 +
+            (p.position.y - enemy.position.y) ** 2,
+        );
+        if (dist < defaults.playerRadius * 2 + 0.1) {
+          handleSlide(toAug(p), toAug(enemy));
+        }
+      });
     });
 };
 

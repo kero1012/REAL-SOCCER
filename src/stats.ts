@@ -25,6 +25,20 @@ let lastKicker: number | null = null;
 let secondLastKicker: number | null = null;
 let lastKickTime: number = 0;
 
+interface AggregatedDbStats {
+  auth: string;
+  name: string;
+  goals: number;
+  assists: number;
+}
+
+const ensurePlayerRow = async (auth: string, name: string) => {
+  await db.run(
+    "INSERT OR IGNORE INTO players(auth, name, elo, vip, goals, assists, matches) VALUES(?, ?, 1200, '0', 0, 0, 0)",
+    [auth, name],
+  );
+};
+
 // Initialize player stats
 export function initPlayerStats(player: PlayerAugmented): void {
   if (!matchStats.has(player.id)) {
@@ -174,26 +188,42 @@ export async function saveMatchStatsToDB(): Promise<void> {
   try {
     // Calculate ratings before saving
     calculateAllRatings();
-    
-    // Save each player's stats with single update query
-    for (const [_, stats] of matchStats) {
-      if (stats.team === 0) continue; // Skip spectators
-      
+
+    const aggregated = new Map<string, AggregatedDbStats>();
+    matchStats.forEach((stats) => {
+      if (stats.team === 0) {
+        return;
+      }
+      const entry = aggregated.get(stats.auth);
+      if (entry) {
+        entry.goals += stats.goals;
+        entry.assists += stats.assists;
+        if (!entry.name && stats.name) {
+          entry.name = stats.name;
+        }
+      } else {
+        aggregated.set(stats.auth, {
+          auth: stats.auth,
+          name: stats.name,
+          goals: stats.goals,
+          assists: stats.assists,
+        });
+      }
+    });
+
+    for (const entry of aggregated.values()) {
+      const baseName = entry.name ?? "";
+      await ensurePlayerRow(entry.auth, baseName);
+      const updatedName = baseName.trim().length > 0 ? baseName : null;
       await db.run(
         `UPDATE players 
-         SET goals = goals + ?, 
+         SET name = COALESCE(?, name),
+             goals = goals + ?, 
              assists = assists + ?,
              matches = matches + 1
          WHERE auth = ?`,
-        [stats.goals, stats.assists, stats.auth]
-      ).catch(() => {
-        // If player doesn't exist, insert them
-        db.run(
-          `INSERT INTO players (auth, name, goals, assists, matches, elo) 
-           VALUES (?, ?, ?, ?, 1, 1000)`,
-          [stats.auth, stats.name, stats.goals, stats.assists]
-        );
-      });
+        [updatedName, entry.goals, entry.assists, entry.auth],
+      );
     }
   } catch (error) {
     console.error("Error saving match stats:", error);

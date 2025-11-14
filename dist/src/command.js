@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -68,6 +78,7 @@ const commands = {
     help: (p) => showHelp(p),
     admin: (p, args) => adminLogin(p, args),
     draft: (p) => draft(p),
+    pick: (p, args) => pick(p, args),
     rs: (p) => rs(p),
     script: (p) => script(p),
     version: (p) => showVersion(p),
@@ -86,23 +97,38 @@ const adminLogin = (p, args) => {
     }
 };
 const draft = (p) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
     if (!index_1.room.getPlayer(p.id).admin) {
         (0, message_1.sendMessage)("❌ ADMIN only command. If you're an admin, log in with !admin", p);
         return;
     }
-    (0, message_1.sendMessage)(`${p.name} has changed map to jakjus Draft`);
+    (0, message_1.sendMessage)(`${p.name} started captain draft mode.`);
     (0, chooser_2.changeDuringDraft)(true);
-    const result = yield (0, draft_1.performDraft)(index_1.room, index_1.room.getPlayerList(), settings_1.teamSize);
-    index_1.room.getPlayerList().forEach((p) => {
-        if (p.team != 0) {
-            index_1.room.setPlayerTeam(p.id, 0);
+    try {
+        const result = yield (0, draft_1.performDraft)(index_1.room, index_1.room.getPlayerList(), settings_1.teamSize);
+        if (!result) {
+            (0, message_1.sendMessage)("Draft ended without forming teams.");
         }
-    });
-    (_a = result === null || result === void 0 ? void 0 : result.red) === null || _a === void 0 ? void 0 : _a.forEach((p) => index_1.room.setPlayerTeam(p.id, 1));
-    (_b = result === null || result === void 0 ? void 0 : result.blue) === null || _b === void 0 ? void 0 : _b.forEach((p) => index_1.room.setPlayerTeam(p.id, 2));
-    (0, chooser_2.changeDuringDraft)(false);
+    }
+    finally {
+        (0, chooser_2.changeDuringDraft)(false);
+    }
 });
+const pick = (p, args) => {
+    if (!(0, draft_1.isDraftRunning)()) {
+        (0, message_1.sendMessage)("There is no active draft right now.", p);
+        return;
+    }
+    if (args.length < 1) {
+        (0, message_1.sendMessage)("Usage: !pick number", p);
+        return;
+    }
+    const value = Number(args[0]);
+    if (!Number.isInteger(value)) {
+        (0, message_1.sendMessage)("Pick number must be an integer.", p);
+        return;
+    }
+    (0, draft_1.handleDraftPick)(p, value);
+};
 const rs = (p) => {
     if (!index_1.room.getPlayer(p.id).admin) {
         (0, message_1.sendMessage)("❌ ADMIN only command. If you're an admin, log in with !admin", p);

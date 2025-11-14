@@ -10,9 +10,9 @@ import {
 } from "./src/out";
 import { checkAllX, rotateBall } from "./src/superpower";
 import { handleLastTouch } from "./src/offside";
-import { checkFoul } from "./src/foul";
+import { checkFoul as evaluateFoul } from "./src/foul";
 import * as fs from "fs";
-import { applySlowdown } from "./src/slowdown";
+import { applySlowdown as applySlowdownEffect } from "./src/slowdown";
 import initChooser from "./src/chooser";
 import { welcomePlayer } from "./src/welcome";
 import { initDb } from "./src/db";
@@ -120,15 +120,17 @@ export class Game {
   rotateBall() {
     rotateBall(this);
   }
-  handleBallTouch() {
+  handleBallTouch(playerList?: PlayerObject[]) {
     const ball = room.getDiscProperties(0);
     if (!ball) {
       return;
     }
-    
+
+    const list = playerList ?? room.getPlayerList();
+
     // Power bar check moved to onGameTick with frame skipping
-    
-    for (const p of room.getPlayerList()) {
+
+    for (const p of list) {
       const prop = room.getPlayerDiscProperties(p.id);
       if (!prop) {
         continue;
@@ -165,11 +167,11 @@ export class Game {
   checkAllX() {
     checkAllX(this);
   }
-  checkFoul() {
-    checkFoul();
+  checkFoul(playerList?: PlayerObject[]) {
+    evaluateFoul(playerList);
   }
-  applySlowdown() {
-    applySlowdown();
+  applySlowdown(playerList?: PlayerObject[]) {
+    applySlowdownEffect(playerList);
   }
 }
 
@@ -227,7 +229,8 @@ const roomBuilder = async (HBInit: Headless, args: RoomConfigObject) => {
     }
     try {
       i++;
-      game.handleBallTouch();
+      const playerList = room.getPlayerList();
+      game.handleBallTouch(playerList);
       
       // Update power bar with reduced frequency for performance
       if (i > 5 && (game as any).powerBar && (game as any).isSetPiece) {
@@ -242,10 +245,10 @@ const roomBuilder = async (HBInit: Headless, args: RoomConfigObject) => {
         } else {
           game.handleBallInPlay();
         }
-        game.applySlowdown();
+        game.applySlowdown(playerList);
         afk.onTick();
         game.checkAllX();
-        game.checkFoul();
+        game.checkFoul(playerList);
         i = 0;
       }
     } catch (e) {
