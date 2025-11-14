@@ -193,23 +193,21 @@ const initChooser = (room: RoomObject) => {
         flag: "r",
       });
       room.setCustomStadium(rsStadium);
-      room.getPlayerList().forEach((p) => {
-        if (p.team != 0) {
-          room.setPlayerTeam(p.id, 0);
-        }
-      });
-      draftResult?.red?.forEach((p) => room.setPlayerTeam(p.id, 1));
-      draftResult?.blue?.forEach((p) => room.setPlayerTeam(p.id, 2));
       duringDraft = false;
-      if (
-        draftResult?.red?.length == maxTeamSize &&
-        draftResult?.blue?.length == maxTeamSize
+      if (!draftResult) {
+        room.getPlayerList().forEach((p) => room.setPlayerTeam(p.id, 0));
+        isRanked = false;
+        sendMessage("Unranked game.");
+        refill();
+      } else if (
+        draftResult.red.length === maxTeamSize &&
+        draftResult.blue.length === maxTeamSize
       ) {
         isRanked = true;
         sendMessage("Ranked game.");
       } else {
-        sendMessage("Unranked game.");
         isRanked = false;
+        sendMessage("Unranked game.");
         refill();
       }
     } else {

@@ -3,7 +3,7 @@ import * as fs from "fs";
 import { room, PlayerAugmented, version } from "../index";
 import { addToGame, handlePlayerLeaveOrAFK } from "./chooser";
 import { adminPass } from "../index";
-import { performDraft } from "./draft/draft";
+import { performDraft, handleDraftPick, isDraftRunning } from "./draft/draft";
 import { teamSize } from "./settings";
 import { changeDuringDraft } from "./chooser";
 import config from "../config";
@@ -30,6 +30,7 @@ const commands: { [key: string]: commandFunc } = {
   help: (p) => showHelp(p),
   admin: (p, args) => adminLogin(p, args),
   draft: (p) => draft(p),
+  pick: (p, args) => pick(p, args),
   rs: (p) => rs(p),
   script: (p) => script(p),
   version: (p) => showVersion(p),
@@ -56,17 +57,33 @@ const draft = async (p: PlayerAugmented) => {
     );
     return;
   }
-  sendMessage(`${p.name} has changed map to jakjus Draft`);
+  sendMessage(`${p.name} started captain draft mode.`);
   changeDuringDraft(true);
-  const result = await performDraft(room, room.getPlayerList(), teamSize);
-  room.getPlayerList().forEach((p) => {
-    if (p.team != 0) {
-      room.setPlayerTeam(p.id, 0);
+  try {
+    const result = await performDraft(room, room.getPlayerList(), teamSize);
+    if (!result) {
+      sendMessage("Draft ended without forming teams.");
     }
-  });
-  result?.red?.forEach((p) => room.setPlayerTeam(p.id, 1));
-  result?.blue?.forEach((p) => room.setPlayerTeam(p.id, 2));
-  changeDuringDraft(false);
+  } finally {
+    changeDuringDraft(false);
+  }
+};
+
+const pick = (p: PlayerAugmented, args: string[]) => {
+  if (!isDraftRunning()) {
+    sendMessage("There is no active draft right now.", p);
+    return;
+  }
+  if (args.length < 1) {
+    sendMessage("Usage: !pick number", p);
+    return;
+  }
+  const value = Number(args[0]);
+  if (!Number.isInteger(value)) {
+    sendMessage("Pick number must be an integer.", p);
+    return;
+  }
+  handleDraftPick(p, value);
 };
 
 const rs = (p: PlayerAugmented) => {

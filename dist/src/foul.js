@@ -24,9 +24,11 @@ const isPenalty = (victim) => {
     return result;
 };
 exports.isPenalty = isPenalty;
-const checkFoul = () => __awaiter(void 0, void 0, void 0, function* () {
-    index_1.room
-        .getPlayerList()
+const checkFoul = (playerList) => __awaiter(void 0, void 0, void 0, function* () {
+    const list = playerList !== null && playerList !== void 0 ? playerList : index_1.room.getPlayerList();
+    const redPlayers = list.filter((pp) => pp.team == 1);
+    const bluePlayers = list.filter((pp) => pp.team == 2);
+    list
         .filter((p) => p.team != 0 && (0, index_1.toAug)(p).sliding)
         .forEach((p) => {
         const ballPos = index_1.room.getBallPosition();
@@ -36,10 +38,8 @@ const checkFoul = () => __awaiter(void 0, void 0, void 0, function* () {
             return;
         }
         const enemyTeam = p.team == 1 ? 2 : 1;
-        index_1.room
-            .getPlayerList()
-            .filter((pp) => pp.team == enemyTeam)
-            .forEach((enemy) => {
+        const opponents = enemyTeam == 1 ? redPlayers : bluePlayers;
+        opponents.forEach((enemy) => {
             const dist = Math.sqrt((p.position.x - enemy.position.x) ** 2 +
                 (p.position.y - enemy.position.y) ** 2);
             if (dist < settings_1.defaults.playerRadius * 2 + 0.1) {

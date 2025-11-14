@@ -2,9 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.applySlowdown = void 0;
 const index_1 = require("../index");
-const applySlowdown = () => {
-    index_1.room
-        .getPlayerList()
+const applySlowdown = (playerList) => {
+    const list = playerList !== null && playerList !== void 0 ? playerList : index_1.room.getPlayerList();
+    list
         .filter((p) => p.team != 0)
         .forEach((p) => {
         const pAug = (0, index_1.toAug)(p);

@@ -1,11 +1,203 @@
-import * as fs from "fs";
-import path from "node:path";
 import { sendMessage } from "../message";
-import { toAug } from "../..";
-import { sleep } from "../utils";
+import { toAug, PlayerAugmented } from "../..";
 
-/* Will be moved to separate NPM module,
- * therefore in a separate folder */
+interface DraftCandidate {
+  id: number;
+  auth: string;
+  name: string;
+  elo: number;
+}
+
+interface DraftCaptain extends DraftCandidate {
+  team: TeamID;
+}
+
+interface DraftState {
+  room: RoomObject;
+  captains: DraftCaptain[];
+  available: DraftCandidate[];
+  teams: {
+    red: DraftCandidate[];
+    blue: DraftCandidate[];
+  };
+  sequence: TeamID[];
+  sequenceIndex: number;
+  pendingResolve?: (candidate: DraftCandidate | null) => void;
+  pendingTimeout?: NodeJS.Timeout;
+  timeoutMs: number;
+  resolve: (result: { red: PlayerObject[]; blue: PlayerObject[] } | null) => void;
+  afkHandler?: Function;
+}
+
+let draftState: DraftState | null = null;
+
+const teamKey = (team: TeamID) => (team === 1 ? "red" : "blue");
+
+const candidateFromPlayer = (player: PlayerObject): DraftCandidate | null => {
+  try {
+    const aug = toAug(player);
+    return {
+      id: player.id,
+      auth: aug.auth,
+      name: player.name,
+      elo: aug.elo,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const getCaptain = (state: DraftState, team: TeamID) =>
+  state.captains.find((c) => c.team === team) ?? null;
+
+const purgeMissingCandidates = (state: DraftState) => {
+  state.available = state.available.filter((candidate) =>
+    state.room.getPlayer(candidate.id),
+  );
+};
+
+const announcePlayers = (state: DraftState) => {
+  purgeMissingCandidates(state);
+  if (state.available.length === 0) {
+    return;
+  }
+  sendMessage("Available players:");
+  state.available.forEach((candidate, index) => {
+    sendMessage(`${index + 1}. ${candidate.name} (${candidate.elo})`);
+  });
+};
+
+const shiftNextAvailable = (state: DraftState): DraftCandidate | null => {
+  while (state.available.length > 0) {
+    const candidate = state.available.shift()!;
+    if (state.room.getPlayer(candidate.id)) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const collectTeamPlayers = (state: DraftState, team: TeamID) => {
+  const key = teamKey(team);
+  return state.teams[key]
+    .map((candidate) => state.room.getPlayer(candidate.id))
+    .filter((p): p is PlayerObject => !!p);
+};
+
+const finalizeDraft = (state: DraftState, cancelled: boolean) => {
+  if (state.pendingTimeout) {
+    clearTimeout(state.pendingTimeout);
+  }
+  state.pendingResolve = undefined;
+  state.pendingTimeout = undefined;
+  if (cancelled) {
+    draftState = null;
+    state.resolve(null);
+    return;
+  }
+  state.available.forEach((candidate) => {
+    const player = state.room.getPlayer(candidate.id);
+    if (player && state.afkHandler) {
+      state.afkHandler(player);
+    }
+  });
+  const redPlayers = collectTeamPlayers(state, 1);
+  const bluePlayers = collectTeamPlayers(state, 2);
+  sendMessage("Draft finished.");
+  draftState = null;
+  state.resolve({ red: redPlayers, blue: bluePlayers });
+};
+
+const assignCandidate = (
+  state: DraftState,
+  team: TeamID,
+  candidate: DraftCandidate,
+) => {
+  const player = state.room.getPlayer(candidate.id);
+  if (!player) {
+    sendMessage(`${candidate.name} is no longer in the room. Pick again.`);
+    return false;
+  }
+  const key = teamKey(team);
+  state.teams[key].push(candidate);
+  state.room.setPlayerTeam(candidate.id, team);
+  sendMessage(
+    `${candidate.name} (${candidate.elo}) joined ${
+      team === 1 ? "🔴 Red" : "🔵 Blue"
+    } team.`,
+  );
+  return true;
+};
+
+const waitForPick = (state: DraftState, team: TeamID) =>
+  new Promise<DraftCandidate | null>((resolve) => {
+    purgeMissingCandidates(state);
+    if (state.available.length === 0) {
+      resolve(null);
+      return;
+    }
+    const captain = getCaptain(state, team);
+    const captainPlayer = captain ? state.room.getPlayer(captain.id) : null;
+    if (!captain || !captainPlayer) {
+      sendMessage("Draft cancelled because a captain left.");
+      finalizeDraft(state, true);
+      resolve(null);
+      return;
+    }
+    sendMessage(
+      `It's your turn to pick. Use !pick <number> within ${
+        state.timeoutMs / 1000
+      }s.`,
+      captainPlayer,
+    );
+    announcePlayers(state);
+    state.pendingResolve = (candidate) => resolve(candidate);
+    state.pendingTimeout = setTimeout(() => {
+      state.pendingTimeout = undefined;
+      state.pendingResolve = undefined;
+      const autoCandidate = shiftNextAvailable(state);
+      if (autoCandidate) {
+        sendMessage(
+          `${autoCandidate.name} auto-picked for ${
+            team === 1 ? "🔴 Red" : "🔵 Blue"
+          } team.`,
+        );
+      }
+      resolve(autoCandidate);
+    }, state.timeoutMs);
+  });
+
+const runDraft = async (state: DraftState) => {
+  for (state.sequenceIndex = 0; state.sequenceIndex < state.sequence.length; ) {
+    if (draftState !== state) {
+      return;
+    }
+    if (state.available.length === 0) {
+      break;
+    }
+    const team = state.sequence[state.sequenceIndex];
+    const candidate = await waitForPick(state, team);
+    if (draftState !== state) {
+      return;
+    }
+    if (!candidate) {
+      state.sequenceIndex += 1;
+      continue;
+    }
+    state.pendingResolve = undefined;
+    state.pendingTimeout = undefined;
+    const assigned = assignCandidate(state, team, candidate);
+    if (draftState !== state) {
+      return;
+    }
+    if (assigned) {
+      state.sequenceIndex += 1;
+    }
+  }
+  if (draftState === state) {
+    finalizeDraft(state, false);
+  }
+};
 
 export const performDraft = async (
   room: RoomObject,
@@ -13,264 +205,129 @@ export const performDraft = async (
   maxTeamSize: number,
   afkHandler?: Function,
 ) => {
+  if (draftState) {
+    sendMessage("Draft is already running.");
+    return null;
+  }
   room.stopGame();
-  players.forEach((p) => room.setPlayerTeam(p.id, 0));
-  const draftMap = fs.readFileSync(path.join(__dirname, "draft.hbs"), {
-    encoding: "utf8",
-    flag: "r",
-  });
-  room.setCustomStadium(draftMap);
-  // set blue players kickable (kicking them by red players results in
-  // choose)
-  players.slice(0, 2).forEach(async (p) => {
-    room.setPlayerTeam(p.id, 1);
-  });
-  await sleep(100);
-  room.startGame();
-  await sleep(100);
-  players.slice(0, 2).forEach(async (p) => {
-    if (room.getPlayer(p.id)) {
-      room.setPlayerDiscProperties(p.id, {
-        cGroup:
-          room.CollisionFlags.red |
-          room.CollisionFlags.c3 |
-          room.CollisionFlags.c1,
-      });
+  const livePlayers = players
+    .map((p) => room.getPlayer(p.id))
+    .filter((p): p is PlayerObject => !!p);
+  const sorted = [...livePlayers].sort((a, b) => toAug(b).elo - toAug(a).elo);
+  if (sorted.length < 2) {
+    sendMessage("Not enough players for draft.");
+    return null;
+  }
+  const totalSlots = Math.min(sorted.length, maxTeamSize * 2);
+  const participants = sorted.slice(0, totalSlots);
+  participants.forEach((p) => room.setPlayerTeam(p.id, 0));
+  const redCaptainPlayer = participants[0];
+  const blueCaptainPlayer = participants[1];
+  const redCaptain = candidateFromPlayer(redCaptainPlayer);
+  const blueCaptain = candidateFromPlayer(blueCaptainPlayer);
+  if (!redCaptain || !blueCaptain) {
+    sendMessage("Unable to determine captains.");
+    return null;
+  }
+  room.setPlayerTeam(redCaptain.id, 1);
+  room.setPlayerTeam(blueCaptain.id, 2);
+  const remaining = participants
+    .slice(2)
+    .map((p) => candidateFromPlayer(p))
+    .filter((c): c is DraftCandidate => !!c);
+  const picksCapacity = Math.max(maxTeamSize * 2 - 2, 0);
+  const available = remaining.slice(0, picksCapacity);
+  const overflow = remaining.slice(picksCapacity);
+  overflow.forEach((candidate) => {
+    const player = room.getPlayer(candidate.id);
+    if (player && afkHandler) {
+      afkHandler(player);
     }
   });
-  sendMessage("Draft has started. Captains choose players by KICKING (X).");
-  let redPicker = players[0];
-  let bluePicker = players[1];
-  players.slice(2).forEach(async (p) => {
-    room.setPlayerTeam(p.id, 2);
-    await sleep(100);
-    if (room.getPlayer(p.id)) {
-      room.setPlayerDiscProperties(p.id, {
-        cGroup:
-          room.CollisionFlags.blue |
-          room.CollisionFlags.c3 |
-          room.CollisionFlags.c1,
-      });
-    }
-  });
-  sendMessage("BLUE enter the draft area (20s).");
-  await sleep(20000);
-  room
-    .getPlayerList()
-    .filter((p) => p.team == 2)
-    .forEach((p) =>
-      room.setPlayerDiscProperties(p.id, {
-        cGroup:
-          room.CollisionFlags.blue |
-          room.CollisionFlags.kick |
-          room.CollisionFlags.c1,
-      }),
-    ); // dont collide with middle line blocks and set kickable
-
-  const setLock = (p: PlayerObject) => {
-    const props = room.getPlayerDiscProperties(p.id);
-    if (!props) { return }
-    room.setPlayerDiscProperties(p.id, {
-      cGroup:
-        room.CollisionFlags.red |
-        room.CollisionFlags.c3 |
-        room.CollisionFlags.c1,
-    });
-    if (Math.abs(props.x) <= 55) {
-      room.setPlayerDiscProperties(p.id, { x: Math.sign(props.x) * 70 });
-    }
-  };
-
-  const setUnlock = (p: PlayerObject) => {
-    room.setPlayerDiscProperties(p.id, {
-      cGroup: room.CollisionFlags.red | room.CollisionFlags.c1,
-    });
-  };
-
-  const redZone = { x: [-360, -210], y: [0, 300] };
-  const blueZone = { x: [210, 360], y: [0, 300] };
-  const midZone = { x: [-15, 15], y: [-300, 600] };
-
-  const playersInZone = (zone: { x: number[]; y: number[] }) =>
-    room
-      .getPlayerList()
-      .filter((p) => p.team == 2)
-      .filter((p) => {
-        if (!room.getScores()) {
-          return [];
-        }
-        const props = room.getPlayerDiscProperties(p.id);
-        return (
-          props.x > zone.x[0] &&
-          props.x < zone.x[1] &&
-          props.y > zone.y[0] &&
-          props.y < zone.y[1]
-        );
-      });
-
-  // segment [62] and [63] is middle draft block
-  // segment [64] is left chooser block
-  // segment [65] is right chooser block
-  // f0c0f0 set cmask: c3
-  // spawn: x: -150, y: 150
-  // x: 25
-
-  sendMessage(redPicker.name + " picks teammate...");
-  sendMessage("PICK YOUR TEAMMATE by KICKING him!", redPicker);
-  let pickingNow = "red";
-  let totalWait = 0;
-  const pickTimeLimit = 20000; // ms
-  const sleepTime = 100; // ms
-  setUnlock(redPicker);
-
-  let previousMidZoneLength = 0;
-  while (playersInZone(midZone).length != 0) {
-    const setNewPickerRed = async () => {
-      if (
-        room
-          .getPlayerList()
-          .map((p) => p.id)
-          .includes(redPicker.id)
-      ) {
-        room.setPlayerTeam(redPicker.id, 0);
-        if (afkHandler) {
-          afkHandler(redPicker);
-        }
+  sendMessage(
+    `Draft started. Captains: 🔴 ${redCaptain.name} vs 🔵 ${blueCaptain.name}.`,
+  );
+  sendMessage("Use !pick <number> to choose teammates. 20 seconds per pick.");
+  const sequence: TeamID[] = [];
+  let round = 0;
+  const totalPicks = available.length;
+  while (sequence.length < totalPicks) {
+    if (round % 2 === 0) {
+      if (sequence.length < totalPicks) {
+        sequence.push(1);
       }
-      const midPlayers = playersInZone(midZone);
-      redPicker = midPlayers[0];
-      room.setPlayerTeam(redPicker.id, 1);
-      await sleep(100);
-      room.setPlayerDiscProperties(redPicker.id, { x: -120, y: 0 });
-      if (pickingNow == "red") {
-        setUnlock(redPicker);
-      } else {
-        setLock(redPicker);
-      }
-      totalWait = 0;
-    };
-
-    const setNewPickerBlue = async () => {
-      if (
-        room
-          .getPlayerList()
-          .map((p) => p.id)
-          .includes(bluePicker.id)
-      ) {
-        room.setPlayerTeam(bluePicker.id, 0);
-        if (afkHandler) {
-          afkHandler(bluePicker);
-        }
-      }
-      const midPlayers = playersInZone(midZone);
-      bluePicker = midPlayers[0];
-      room.setPlayerTeam(bluePicker.id, 1);
-      await sleep(100);
-      room.setPlayerDiscProperties(bluePicker.id, { x: 120, y: 0 });
-      if (pickingNow == "blue") {
-        setUnlock(bluePicker);
-      } else {
-        setLock(bluePicker);
-      }
-      totalWait = 0;
-    };
-
-    // if teams full
-    if (
-      playersInZone(redZone).length == maxTeamSize - 1 &&
-      playersInZone(blueZone).length == maxTeamSize - 1
-    ) {
-      break;
-    }
-    // if picker left
-    if (
-      !room
-        .getPlayerList()
-        .map((p) => p.id)
-        .includes(redPicker.id) ||
-      toAug(redPicker).afk
-    ) {
-      sendMessage("Red picker left. Changing red picker...");
-      await setNewPickerRed();
-    }
-    if (
-      !room
-        .getPlayerList()
-        .map((p) => p.id)
-        .includes(bluePicker.id) ||
-      toAug(bluePicker).afk
-    ) {
-      sendMessage("Blue picker left. Changing blue picker...");
-      await setNewPickerBlue();
-    }
-
-    totalWait += sleepTime;
-
-    // reset wait if player was picked
-    if (playersInZone(midZone).length != previousMidZoneLength) {
-      previousMidZoneLength = playersInZone(midZone).length;
-      totalWait = 0;
-    }
-    if (pickingNow == "red") {
-      if (
-        playersInZone(redZone).length >= playersInZone(blueZone).length + 1 ||
-        totalWait > pickTimeLimit
-      ) {
-        if (totalWait > pickTimeLimit) {
-          sendMessage("Timeout. Changing red picker...");
-          await setNewPickerRed();
-          continue;
-        }
-        pickingNow = "blue";
-        sendMessage(bluePicker.name + " picks teammate...");
-        sendMessage("Pick 2 players by KICKING them.", bluePicker);
-        setUnlock(bluePicker);
-        setLock(redPicker);
-        totalWait = 0;
-        continue;
+      if (sequence.length < totalPicks) {
+        sequence.push(2);
       }
     } else {
-      if (
-        playersInZone(blueZone).length >= playersInZone(redZone).length + 1 ||
-        totalWait > pickTimeLimit
-      ) {
-        if (totalWait > pickTimeLimit) {
-          sendMessage("Timeout. Changing blue picker...");
-          await setNewPickerBlue();
-          continue;
-        }
-        pickingNow = "red";
-        sendMessage(`${redPicker.name} picks teammate...`);
-        sendMessage("Pick 2 players by KICKING them!", redPicker);
-        setUnlock(redPicker);
-        setLock(bluePicker);
-        totalWait = 0;
-        continue;
+      if (sequence.length < totalPicks) {
+        sequence.push(2);
+      }
+      if (sequence.length < totalPicks) {
+        sequence.push(1);
       }
     }
-    await sleep(sleepTime);
-    if (!room.getScores()) {
-      sendMessage("Draft cancelled.");
-      break;
-    }
+    round += 1;
   }
-  await sleep(100); // wait for last pick to arrive in box
-  const red = [...playersInZone(redZone), redPicker];
-  const blue = [...playersInZone(blueZone), bluePicker];
-  room
-    .getPlayerList()
-    .filter(
-      (p) =>
-        ![...red, ...blue, ...playersInZone(midZone)]
-          .map((pp) => pp.id)
-          .includes(p.id),
-    )
-    .forEach((p) => {
-      if (afkHandler) {
-        afkHandler(p);
-      }
-    });
-  room.stopGame();
-  sendMessage("Draft finished.");
-  return { red, blue };
+  return await new Promise<{ red: PlayerObject[]; blue: PlayerObject[] } | null>(
+    (resolve) => {
+      draftState = {
+        room,
+        captains: [
+          { ...redCaptain, team: 1 },
+          { ...blueCaptain, team: 2 },
+        ],
+        available,
+        teams: {
+          red: [redCaptain],
+          blue: [blueCaptain],
+        },
+        sequence,
+        sequenceIndex: 0,
+        pendingResolve: undefined,
+        pendingTimeout: undefined,
+        timeoutMs: 20000,
+        resolve,
+        afkHandler,
+      };
+      runDraft(draftState);
+    },
+  );
 };
+
+export const handleDraftPick = (
+  player: PlayerAugmented,
+  selection: number,
+) => {
+  const state = draftState;
+  if (!state || state.pendingResolve === undefined) {
+    sendMessage("There is no pick pending right now.", player);
+    return;
+  }
+  const team = state.sequence[state.sequenceIndex];
+  const captain = getCaptain(state, team);
+  if (!captain || captain.id !== player.id) {
+    sendMessage("You are not the captain picking now.", player);
+    return;
+  }
+  if (!Number.isInteger(selection) || selection < 1) {
+    sendMessage("Invalid pick number.", player);
+    return;
+  }
+  if (selection > state.available.length) {
+    sendMessage("Pick number is out of range.", player);
+    return;
+  }
+  const resolver = state.pendingResolve;
+  if (state.pendingTimeout) {
+    clearTimeout(state.pendingTimeout);
+    state.pendingTimeout = undefined;
+  }
+  state.pendingResolve = undefined;
+  const candidate = state.available.splice(selection - 1, 1)[0];
+  if (resolver) {
+    resolver(candidate);
+  }
+};
+
+export const isDraftRunning = () => draftState !== null;

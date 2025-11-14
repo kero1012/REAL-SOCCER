@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -100,14 +110,15 @@ class Game {
     rotateBall() {
         (0, superpower_1.rotateBall)(this);
     }
-    handleBallTouch() {
+    handleBallTouch(playerList) {
         var _a;
         const ball = exports.room.getDiscProperties(0);
         if (!ball) {
             return;
         }
+        const list = playerList !== null && playerList !== void 0 ? playerList : exports.room.getPlayerList();
         // Power bar check moved to onGameTick with frame skipping
-        for (const p of exports.room.getPlayerList()) {
+        for (const p of list) {
             const prop = exports.room.getPlayerDiscProperties(p.id);
             if (!prop) {
                 continue;
@@ -145,11 +156,11 @@ class Game {
     checkAllX() {
         (0, superpower_1.checkAllX)(this);
     }
-    checkFoul() {
-        (0, foul_1.checkFoul)();
+    checkFoul(playerList) {
+        (0, foul_1.checkFoul)(playerList);
     }
-    applySlowdown() {
-        (0, slowdown_1.applySlowdown)();
+    applySlowdown(playerList) {
+        (0, slowdown_1.applySlowdown)(playerList);
     }
 }
 exports.Game = Game;
@@ -202,7 +213,8 @@ const roomBuilder = (HBInit, args) => __awaiter(void 0, void 0, void 0, function
         }
         try {
             i++;
-            exports.game.handleBallTouch();
+            const playerList = exports.room.getPlayerList();
+            exports.game.handleBallTouch(playerList);
             // Update power bar with reduced frequency for performance
             if (i > 5 && exports.game.powerBar && exports.game.isSetPiece) {
                 exports.game.powerBar.checkActivation(exports.game.isSetPiece);
@@ -216,10 +228,10 @@ const roomBuilder = (HBInit, args) => __awaiter(void 0, void 0, void 0, function
                 else {
                     exports.game.handleBallInPlay();
                 }
-                exports.game.applySlowdown();
+                exports.game.applySlowdown(playerList);
                 afk_1.afk.onTick();
                 exports.game.checkAllX();
-                exports.game.checkFoul();
+                exports.game.checkFoul(playerList);
                 i = 0;
             }
         }

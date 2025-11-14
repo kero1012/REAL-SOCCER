@@ -1,8 +1,8 @@
 import { PlayerAugmented, room, toAug } from "../index";
 
-export const applySlowdown = () => {
-  room
-    .getPlayerList()
+export const applySlowdown = (playerList?: PlayerObject[]) => {
+  const list = playerList ?? room.getPlayerList();
+  list
     .filter((p) => p.team != 0)
     .forEach((p) => {
       const pAug = toAug(p);

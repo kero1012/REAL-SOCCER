@@ -34,6 +34,9 @@ exports.matchStats = new Map();
 let lastKicker = null;
 let secondLastKicker = null;
 let lastKickTime = 0;
+const ensurePlayerRow = (auth, name) => __awaiter(void 0, void 0, void 0, function* () {
+    yield db_1.db.run("INSERT OR IGNORE INTO players(auth, name, elo, vip, goals, assists, matches) VALUES(?, ?, 1200, '0', 0, 0, 0)", [auth, name]);
+});
 // Initialize player stats
 function initPlayerStats(player) {
     if (!exports.matchStats.has(player.id)) {
@@ -120,13 +123,13 @@ function trackPass(player, successful) {
 // Calculate player rating (FIFA-style)
 function calculateRating(stats) {
     const baseRating = 5.0; // Start at 5/10
-    // Points for different actions
-    const goalPoints = stats.goals * 1.0;
-    const assistPoints = stats.assists * 0.7;
-    const savePoints = stats.saves * 0.5;
+    // Points for different actions - Goals matter most!
+    const goalPoints = stats.goals * 1.2; // Increased from 1.0
+    const assistPoints = stats.assists * 0.8; // Increased from 0.7
+    const savePoints = stats.saves * 0.6; // Increased from 0.5
     const tacklePoints = stats.tackles * 0.3;
-    const passPoints = (stats.passSuccess / Math.max(1, stats.passes)) * 0.5;
-    const touchPoints = Math.min(stats.touches * 0.01, 0.5); // Cap at 0.5
+    const passPoints = (stats.passSuccess / Math.max(1, stats.passes)) * 0.4;
+    const touchPoints = Math.min(stats.touches * 0.005, 0.3); // Reduced impact and cap
     // Calculate final rating (max 10)
     const totalPoints = goalPoints + assistPoints + savePoints + tacklePoints + passPoints + touchPoints;
     const rating = Math.min(10, baseRating + totalPoints);
@@ -134,16 +137,22 @@ function calculateRating(stats) {
 }
 // Get MVP based on performance
 function getMVP() {
+    // First calculate all ratings
+    calculateAllRatings();
     let bestPlayer = null;
-    let bestScore = -1;
+    let bestRating = -1;
+    let bestImpact = -1;
     exports.matchStats.forEach((stats) => {
         // Only consider players who were on a team
         if (stats.team === 0)
             return;
-        // MVP Score calculation
-        const mvpScore = (stats.goals * 3) + (stats.assists * 2) + (stats.saves * 1) + (stats.touches * 0.05);
-        if (mvpScore > bestScore) {
-            bestScore = mvpScore;
+        // MVP is the player with highest rating
+        // In case of tie, use impact score (goals + assists)
+        const impactScore = (stats.goals * 2) + stats.assists;
+        if (stats.rating > bestRating ||
+            (stats.rating === bestRating && impactScore > bestImpact)) {
+            bestRating = stats.rating;
+            bestImpact = impactScore;
             bestPlayer = stats;
         }
     });
@@ -158,22 +167,42 @@ function calculateAllRatings() {
 // Save match stats to database (called once at match end)
 function saveMatchStatsToDB() {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         try {
             // Calculate ratings before saving
             calculateAllRatings();
-            // Save each player's stats with single update query
-            for (const [_, stats] of exports.matchStats) {
-                if (stats.team === 0)
-                    continue; // Skip spectators
+            const aggregated = new Map();
+            exports.matchStats.forEach((stats) => {
+                if (stats.team === 0) {
+                    return;
+                }
+                const entry = aggregated.get(stats.auth);
+                if (entry) {
+                    entry.goals += stats.goals;
+                    entry.assists += stats.assists;
+                    if (!entry.name && stats.name) {
+                        entry.name = stats.name;
+                    }
+                }
+                else {
+                    aggregated.set(stats.auth, {
+                        auth: stats.auth,
+                        name: stats.name,
+                        goals: stats.goals,
+                        assists: stats.assists,
+                    });
+                }
+            });
+            for (const entry of aggregated.values()) {
+                const baseName = (_a = entry.name) !== null && _a !== void 0 ? _a : "";
+                yield ensurePlayerRow(entry.auth, baseName);
+                const updatedName = baseName.trim().length > 0 ? baseName : null;
                 yield db_1.db.run(`UPDATE players 
-         SET goals = goals + ?, 
+         SET name = COALESCE(?, name),
+             goals = goals + ?, 
              assists = assists + ?,
              matches = matches + 1
-         WHERE auth = ?`, [stats.goals, stats.assists, stats.auth]).catch(() => {
-                    // If player doesn't exist, insert them
-                    db_1.db.run(`INSERT INTO players (auth, name, goals, assists, matches, elo) 
-           VALUES (?, ?, ?, ?, 1, 1000)`, [stats.auth, stats.name, stats.goals, stats.assists]);
-                });
+         WHERE auth = ?`, [updatedName, entry.goals, entry.assists, entry.auth]);
             }
         }
         catch (error) {
@@ -185,10 +214,14 @@ function saveMatchStatsToDB() {
 function announceMVP() {
     const mvp = getMVP();
     if (mvp) {
+        const teamEmoji = mvp.team === 1 ? "🔴" : "🔵";
+        const performanceText = mvp.goals > 2 ? " ⭐ OUTSTANDING PERFORMANCE!" :
+            mvp.goals > 1 ? " 🌟 Great Performance!" :
+                " ✨ Good Performance!";
         (0, message_1.sendMessage)(`━━━━━━━━━━━━━━━━━━━━━━━━━`);
-        (0, message_1.sendMessage)(`🏆 MVP OF THE MATCH: ${mvp.name}`);
-        (0, message_1.sendMessage)(`⚽ Goals: ${mvp.goals} | 🎯 Assists: ${mvp.assists} | 💾 Saves: ${mvp.saves}`);
-        (0, message_1.sendMessage)(`📊 Rating: ${mvp.rating}/10`);
+        (0, message_1.sendMessage)(`🏆 MVP OF THE MATCH`);
+        (0, message_1.sendMessage)(`${teamEmoji} ${mvp.name} - Rating: ${mvp.rating}/10${performanceText}`);
+        (0, message_1.sendMessage)(`⚽ Goals: ${mvp.goals} | 🎯 Assists: ${mvp.assists} | 💾 Saves: ${mvp.saves} | 👟 Touches: ${mvp.touches}`);
         (0, message_1.sendMessage)(`━━━━━━━━━━━━━━━━━━━━━━━━━`);
     }
 }
@@ -197,13 +230,15 @@ function announceRatings() {
     calculateAllRatings();
     const sortedPlayers = Array.from(exports.matchStats.values())
         .filter(s => s.team !== 0) // Exclude spectators
-        .sort((a, b) => b.rating - a.rating);
+        .sort((a, b) => b.rating - a.rating)
+        .slice(0, 5); // Show only top 5 players
     if (sortedPlayers.length === 0)
         return;
-    (0, message_1.sendMessage)(`📊 PLAYER RATINGS:`);
+    (0, message_1.sendMessage)(`📊 TOP 5 PLAYER RATINGS:`);
     sortedPlayers.forEach((stats, index) => {
-        const medal = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "  ";
-        (0, message_1.sendMessage)(`${medal} ${stats.name}: ${stats.rating}/10 (G:${stats.goals} A:${stats.assists} S:${stats.saves})`);
+        const rank = `${index + 1}.`;
+        const teamEmoji = stats.team === 1 ? "🔴" : "🔵";
+        (0, message_1.sendMessage)(`${rank} ${teamEmoji} ${stats.name}: ${stats.rating}/10 (⚽${stats.goals} 🎯${stats.assists} 💾${stats.saves})`);
     });
 }
 // Check if match is ranked (4v4 or more)
