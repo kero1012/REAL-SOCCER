@@ -96,6 +96,10 @@ function trackGoal(scorerTeam) {
             }
         }
     }
+    // Reset tracking variables after goal
+    lastKicker = null;
+    secondLastKicker = null;
+    lastKickTime = 0;
 }
 // Track save
 function trackSave(player) {

@@ -80,7 +80,7 @@ const checkOffside = (game, p) => __awaiter(void 0, void 0, void 0, function* ()
     if (atkDirection * receiverDuringPass.position.x < atkDirection * lt.x) {
         return;
     }
-    if (index_1.room.getPlayerList().filter((p) => p.team != 0).length <= 6) {
+    if (index_1.room.getPlayerList().filter((p) => p.team != 0).length <= 4) {
         (0, message_1.sendMessage)("❌🚩 NO OFFSIDE with 4 players or below.");
         return;
     }
